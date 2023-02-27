@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    tools:context="com.movesense.samples.dataloggersample.DataLoggerActivity"
+    tools:showIn="@layout/activity_datalogger">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/help_text_datalogger"
+        android:layout_margin="8dp"
+        android:id="@+id/textView2" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="8dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/datalogger_state"
+            android:layout_marginEnd="11dp"
+            android:layout_marginRight="11dp" />
+
+        <TextView
+            android:id="@+id/textViewDLState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="--"
+            android:layout_marginTop="0dp"
+            android:layout_marginRight="11dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Current Log ID:"
+            android:layout_marginRight="11dp" />
+
+        <TextView
+            android:id="@+id/textViewCurrentLogID"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="--"
+            android:layout_marginTop="0dp"
+            android:layout_marginRight="32dp" />
+
+    </LinearLayout>
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="8dp"
+        android:orientation="horizontal">
+        <TextView
+            android:id="@+id/textView3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Path to measure"
+            android:layout_marginTop="0dp"
+            android:layout_marginRight="32dp" />
+        <Spinner
+            android:id="@+id/path_spinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:entries="@array/datalogger_paths"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="8dp"
+        android:orientation="horizontal">
+        <Button
+            android:id="@+id/buttonCreateNewLog"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Create New Log"
+            android:visibility="visible"
+            android:onClick="onCreateNewLogClicked"
+            android:layout_margin="8dp"
+            />
+
+        <Button
+            android:id="@+id/buttonStartLogging"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/start_logging"
+            android:visibility="invisible"
+            android:onClick="onStartLoggingClicked"
+            android:layout_margin="8dp"
+            />
+
+        <Button
+            android:id="@+id/buttonStopLogging"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/stop_logging"
+            android:visibility="gone"
+            android:onClick="onStopLoggingClicked"
+            android:layout_margin="8dp"
+            />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="8dp"
+        android:orientation="horizontal">
+
+
+        <Button
+            android:id="@+id/buttonRefreshLogs"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/refresh_logbook_list"
+            android:visibility="visible"
+            android:layout_margin="8dp"
+            android:onClick="onRefreshLogsClicked"
+            />
+
+        <Button
+            android:id="@+id/buttonEraseLogs"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Erase Logbook"
+            android:visibility="visible"
+            android:layout_margin ="8dp"
+            android:onClick="onEraseLogsClicked"/>
+    </LinearLayout>
+    <LinearLayout
+        android:id="@+id/headerProgress"
+        android:layout_width="fill_parent"
+        android:layout_height="fill_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:visibility="gone" >
+
+        <ProgressBar
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            style="@android:style/Widget.ProgressBar.Large" />
+
+        <TextView
+            android:id="@+id/tvProgressText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+    </LinearLayout>
+    <ListView
+        android:id="@+id/listViewLogbookEntries"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="8dp"
+        tools:layout_constraintLeft_creator="1"
+        tools:layout_constraintRight_creator="1" />
+
+</LinearLayout>
