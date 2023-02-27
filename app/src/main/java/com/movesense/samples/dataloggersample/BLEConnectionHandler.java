@@ -91,14 +91,17 @@ public class BLEConnectionHandler {
                 setCurrentTimeToSensor(serial);
                 Log.d(LOG_TAG, "After set current time");
 
-                Log.d(LOG_TAG, "Caller activity name: " + callerActivity.getLocalClassName());
-                if (callerActivity.getLocalClassName().equals("MainActivity")) {
-                    // Open the DataLoggerActivity
-                    Intent intent = new Intent(callerActivity, DataLoggerActivity.class);
-                    intent.putExtra(DataLoggerActivity.SERIAL, serial);
-                    intent.putExtra(DataLoggerActivity.MAC, macAddress);
-                    callerActivity.startActivity(intent);
+                if (callerActivity != null) {
+                    Log.d(LOG_TAG, "Caller activity name: " + callerActivity.getLocalClassName());
+                    if (callerActivity.getLocalClassName().equals("MainActivity")) {
+                        // Open the DataLoggerActivity
+                        Intent intent = new Intent(callerActivity, DataLoggerActivity.class);
+                        intent.putExtra(DataLoggerActivity.SERIAL, serial);
+                        intent.putExtra(DataLoggerActivity.MAC, macAddress);
+                        callerActivity.startActivity(intent);
+                    }
                 }
+
                 connected = true;
             }
 

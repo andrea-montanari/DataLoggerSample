@@ -1,15 +1,18 @@
 package com.movesense.samples.dataloggersample;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
@@ -25,11 +28,9 @@ import androidx.annotation.RequiresApi;
 
 import com.google.gson.Gson;
 import com.movesense.mds.Mds;
-import com.movesense.mds.MdsConnectionListener;
 import com.movesense.mds.MdsException;
 import com.movesense.mds.MdsResponseListener;
 import com.polidea.rxandroidble2.RxBleClient;
-import com.polidea.rxandroidble2.RxBleDevice;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -41,7 +42,6 @@ import java.nio.charset.StandardCharsets;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.Objects;
 
 public class DataLoggerActivity extends AppCompatActivity
         implements
@@ -50,10 +50,10 @@ public class DataLoggerActivity extends AppCompatActivity
 {
     private static final boolean AUTOMATIC_LOGGING_MANAGEMENT = true;
     private static final int RECORDING_TIME = 20;     // Minutes
-    private static Thread thread;
-    private static boolean logging;
-    private static boolean logCreated = false;
-    private static boolean logEntryFetched = false;
+//    private static Thread thread;
+//    private static boolean logging;
+//    private static boolean logCreated = false;
+//    private static boolean logEntryFetched = false;
 
     private static final String URI_MDS_LOGBOOK_ENTRIES = "suunto://MDS/Logbook/{0}/Entries";
     private static final String URI_MDS_LOGBOOK_DATA= "suunto://MDS/Logbook/{0}/ById/{1}/Data";
@@ -61,6 +61,8 @@ public class DataLoggerActivity extends AppCompatActivity
     private static final String URI_LOGBOOK_ENTRIES = "suunto://{0}/Mem/Logbook/Entries";
     private static final String URI_DATALOGGER_STATE = "suunto://{0}/Mem/DataLogger/State";
     private static final String URI_DATALOGGER_CONFIG = "suunto://{0}/Mem/DataLogger/Config";
+
+    public static final int LOG_ID_MSG = 123;
 
     static DataLoggerActivity s_INSTANCE = null;
     private static final String LOG_TAG = DataLoggerActivity.class.getSimpleName();
@@ -79,10 +81,20 @@ public class DataLoggerActivity extends AppCompatActivity
     private ListView mLogEntriesListView;
     private static ArrayList<MdsLogbookEntriesResponse.LogEntry> mLogEntriesArrayList = new ArrayList<>();
     ArrayAdapter<MdsLogbookEntriesResponse.LogEntry> mLogEntriesArrayAdapter;
+    private TextView tvLogId;
 
+    // Service variables
     private Intent loggerServiceIntent;
+    LoggerForegroundService mService;
+    boolean mBound = false;
+
+    // Variable for updating UI while service is running
+    Thread threadUpdateUI;
+    boolean updateUI = false;
 
     public static final String SCHEME_PREFIX = "suunto://";
+
+    private Handler logIdHandler;
 
     private Mds getMDS() {return MainActivity.mMds;}
 
@@ -95,6 +107,7 @@ public class DataLoggerActivity extends AppCompatActivity
 
         // Init state UI
         mDataLoggerStateTextView = (TextView)findViewById(R.id.textViewDLState);
+        tvLogId = (TextView) findViewById(R.id.textViewCurrentLogID);
 
         // Init Log list
         mLogEntriesListView = (ListView)findViewById(R.id.listViewLogbookEntries);
@@ -107,6 +120,12 @@ public class DataLoggerActivity extends AppCompatActivity
         pathSpinner.setOnItemSelectedListener(this);
         mPathSelectionSetInternally = true;
         pathSpinner.setSelection(0);
+
+        logIdHandler = new Handler();
+
+        // Bind to service
+        loggerServiceIntent = new Intent(this, LoggerForegroundService.class);
+        bindService(loggerServiceIntent, connection, Context.BIND_AUTO_CREATE);
 
         // Initialize Movesense MDS library
         if (mMds == null) {
@@ -137,15 +156,70 @@ public class DataLoggerActivity extends AppCompatActivity
     }
 
 
+    //region Service methods
+    // ---------------------------------------------------------------------------------------------
+    private ServiceConnection connection = new ServiceConnection() {
+
+        @Override
+        public void onServiceConnected(ComponentName className,
+                                       IBinder service) {
+            // We've bound to LocalService, cast the IBinder and get LocalService instance
+            LoggerForegroundService.LocalBinder binder = (LoggerForegroundService.LocalBinder) service;
+            mService = binder.getService();
+            mBound = true;
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName arg0) {
+            mBound = false;
+        }
+    };
+
     @RequiresApi(api = Build.VERSION_CODES.O)
     private void startService() {
-        loggerServiceIntent = new Intent(this, LoggerForegroundService.class);
         startForegroundService(loggerServiceIntent);
+        updateUI = true;
+
+        threadUpdateUI = new Thread() {
+            @Override
+            public void run() {
+                while (updateUI) {
+                    try {
+                        Thread.sleep(500);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+
+                    int logId = mService.getLogId();
+                    logIdHandler.post(() -> {
+                        mLogEntriesArrayList.clear();
+                        MdsLogbookEntriesResponse entriesResponse = mService.getEntriesResponse();
+                        if (entriesResponse != null) {
+                            for (MdsLogbookEntriesResponse.LogEntry logEntry : entriesResponse.logEntries) {
+                                Log.d(LOG_TAG, "Entry: " + logEntry);
+                                mLogEntriesArrayList.add(logEntry);
+                            }
+                            mLogEntriesArrayAdapter.notifyDataSetChanged();
+                            tvLogId.setText("" + logId);
+                        }
+                    });
+                }
+            }
+        };
+        threadUpdateUI.start();
     }
 
     private void stopService() {
+        mService.setLogging(false);
+        if (mBound) {
+            unbindService(connection);
+        }
+        mBound = false;
+        updateUI = false;
         this.stopService(loggerServiceIntent);
     }
+    // ---------------------------------------------------------------------------------------------
+    //endregion
 
     private void updateDataLoggerUI() {
         Log.d(LOG_TAG, "updateDataLoggerUI() state: " + mDLState + ", path: " + mDLConfigPath);
@@ -271,79 +345,79 @@ public class DataLoggerActivity extends AppCompatActivity
         });
     }
 
-    private void automaticLoggingManagement(int logId) {
-        Activity currentActivity = this;
+//    private void automaticLoggingManagement(int logId) {
+//        Activity currentActivity = this;
+//
+//        thread = new Thread() {
+//            @Override public void run() {
+//                long startTime;
+//                long endTime;
+//                int id = logId;
+//                while (logging) {
+//                    startTime = SystemClock.elapsedRealtime();
+//                    if (id > 2) {
+//                        fetchLogEntry(id - 1);
+//                    }
+//                    else {
+//                        logEntryFetched = true;
+//                    }
+//                    // Wait for new log to be created and for data to be fetched before disconnecting the device
+//                    while (!logCreated || !logEntryFetched) {
+//                        Log.d("BLE_CONNECTION_HANDLER", "Waiting for data retrieval...");
+//                        try {
+//                            thread.sleep(50);
+//                        } catch (InterruptedException e) {
+//                            e.printStackTrace();
+//                        }
+//                    }
+//                    logCreated = false;
+//                    logEntryFetched = false;
+//                    endTime = SystemClock.elapsedRealtime();
+//                    try {
+//                        Log.d("MAC", "Connected MAC: " + connectedMAC);
+//                        BLEConnectionHandler.disconnectBLEDevice(connectedMAC);
+//                        long timeToSleep = 3000 - (endTime - startTime);
+//                        Log.d("Time", "Time difference: " + (endTime - startTime));
+//                        Log.d("Time", "Time to sleep: " + timeToSleep);
+//                        if (timeToSleep < 0) {
+//                            thread.sleep(0);
+//                        }
+//                        else {
+//                            thread.sleep(timeToSleep);
+//                        }
+//                        BLEConnectionHandler.connectBLEDevice(connectedMAC, currentActivity);
+//                        while (!BLEConnectionHandler.getDeviceIsConnected(connectedMAC)) {
+//                            Log.d("BLE_CONNECTION_HANDLER", "Waiting for connection...");
+//                            thread.sleep(100);
+//                        }
+//                        Log.d("BLE_CONNECTION_HANDLER", "After while. Connection completed.");
+//                        Log.d("Time", "Time after: " + System.nanoTime()/1000);
+//                    } catch (InterruptedException e) {
+//                        e.printStackTrace();
+//                    }
+//                    // Check again for when the STOP LOGGING button is pressed
+//                    if (logging) {
+//                        createNewLog();
+//                        id++;
+//                    }
+//                }
+//            }
+//        };
+//        thread.start();
+//    }
 
-        thread = new Thread() {
-            @Override public void run() {
-                long startTime;
-                long endTime;
-                int id = logId;
-                while (logging) {
-                    startTime = SystemClock.elapsedRealtime();
-                    if (id > 2) {
-                        fetchLogEntry(id - 1);
-                    }
-                    else {
-                        logEntryFetched = true;
-                    }
-                    // Wait for new log to be created and for data to be fetched before disconnecting the device
-                    while (!logCreated || !logEntryFetched) {
-                        Log.d("BLE_CONNECTION_HANDLER", "Waiting for data retrieval...");
-                        try {
-                            thread.sleep(50);
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
-                    }
-                    logCreated = false;
-                    logEntryFetched = false;
-                    endTime = SystemClock.elapsedRealtime();
-                    try {
-                        Log.d("MAC", "Connected MAC: " + connectedMAC);
-                        BLEConnectionHandler.disconnectBLEDevice(connectedMAC);
-                        long timeToSleep = 3000 - (endTime - startTime);
-                        Log.d("Time", "Time difference: " + (endTime - startTime));
-                        Log.d("Time", "Time to sleep: " + timeToSleep);
-                        if (timeToSleep < 0) {
-                            thread.sleep(0);
-                        }
-                        else {
-                            thread.sleep(timeToSleep);
-                        }
-                        BLEConnectionHandler.connectBLEDevice(connectedMAC, currentActivity);
-                        while (!BLEConnectionHandler.getDeviceIsConnected(connectedMAC)) {
-                            Log.d("BLE_CONNECTION_HANDLER", "Waiting for connection...");
-                            thread.sleep(100);
-                        }
-                        Log.d("BLE_CONNECTION_HANDLER", "After while. Connection completed.");
-                        Log.d("Time", "Time after: " + System.nanoTime()/1000);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                    // Check again for when the STOP LOGGING button is pressed
-                    if (logging) {
-                        createNewLog();
-                        id++;
-                    }
-                }
-            }
-        };
-        thread.start();
-    }
-
-    private void createNewLogSync() {
-        // TODO: fix this -> it blocks the main thread.
-        createNewLog();
-        while (!logCreated) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-        logCreated = false;
-    }
+//    private void createNewLogSync() {
+//        // TODO: fix this -> it blocks the main thread.
+//        createNewLog();
+//        while (!logCreated) {
+//            try {
+//                Thread.sleep(100);
+//            } catch (InterruptedException e) {
+//                e.printStackTrace();
+//            }
+//        }
+//        logCreated = false;
+//    }
 
     private void setDataLoggerState(final boolean bStartLogging) {
         Log.d("THREAD_STOP_LOGGING", "setDataLoggerState");
@@ -354,6 +428,7 @@ public class DataLoggerActivity extends AppCompatActivity
         Log.d("THREAD_STOP_LOGGING", "setDataLoggerState, new state");
         String payload = "{\"newState\":" + newState + "}";
         getMDS().put(stateUri, payload, new MdsResponseListener() {
+            @RequiresApi(api = Build.VERSION_CODES.O)
             @Override
             public void onSuccess(String data) {
                 Log.i(LOG_TAG, "PUT DataLogger/State state succesful: " + data);
@@ -368,7 +443,7 @@ public class DataLoggerActivity extends AppCompatActivity
                 String textId = "";
 
                 if (AUTOMATIC_LOGGING_MANAGEMENT)
-                    logging = bStartLogging;
+                    mService.setLogging(true);
                     if (bStartLogging) {
 
                         try {
@@ -382,16 +457,37 @@ public class DataLoggerActivity extends AppCompatActivity
                         }
                         Log.d(LOG_TAG, "Id: " + textId);
                         if (textId.equals("--")) {
-                            createNewLogSync();
+                            createNewLog();
                         }
                         textId = ((TextView)findViewById(R.id.textViewCurrentLogID)).getText().toString();
                         int logId = Integer.parseInt(textId);
-                        automaticLoggingManagement(logId);
+
+                        if (!mBound) {
+                            bindService(loggerServiceIntent, connection, Context.BIND_AUTO_CREATE);
+                        }
+                        // Wait for binding if it hasn't yet completed, then setting some essential
+                        // variables and starting service
+                        new Thread() {
+                            @Override public void run() {
+                                while (!mBound) {
+                                    Log.d(LOG_TAG, "Waiting for binding.");
+                                    try {
+                                        Thread.sleep(100);
+                                    } catch (InterruptedException e) {
+                                        e.printStackTrace();
+                                    }
+                                }
+                                mService.setConnectedMAC(connectedMAC);
+                                mService.setLogId(logId);
+                                startService();
+                            }
+                        }.start();
+//                        automaticLoggingManagement(logId);
                     }
                     else {
                         textId = ((TextView)findViewById(R.id.textViewCurrentLogID)).getText().toString();
                         if (textId.equals("--")) {
-                            createNewLogSync();
+                            createNewLog();
                         }
                         textId = ((TextView)findViewById(R.id.textViewCurrentLogID)).getText().toString();
                         int logId = Integer.parseInt(textId);
@@ -425,9 +521,7 @@ public class DataLoggerActivity extends AppCompatActivity
     public void onStopLoggingClicked(View view) {
         Activity currentActivity = this;
         Log.d("THREAD_STOP_LOGGING", "onStopLogging");
-        if (thread != null) {
-            logging = false;
-        }
+        stopService();
         Log.d("THREAD_STOP_LOGGING", "Auto thread stopped");
 
         Thread threadStopLogging = new Thread() {
@@ -448,7 +542,7 @@ public class DataLoggerActivity extends AppCompatActivity
                     }
                 }
                 // Wait for data retrieval to finish
-                while (thread != null && thread.isAlive()) {
+                while (mService.getThreadIsRunning()) {
                     Log.d("THREAD_STOP_LOGGING", "Thread active");
                     try {
                         Thread.sleep(100);
@@ -610,7 +704,7 @@ public class DataLoggerActivity extends AppCompatActivity
             @Override
             public void onSuccess(final String data) {
                 Log.d("BLE_CONNECTION_HANDLER", "fetchLogEntry: success");
-                logEntryFetched = true;
+                mService.setLogEntryFetched(true);
                 MdsLogbookEntriesResponse.LogEntry entry = findLogEntry(id);
 
 
@@ -789,7 +883,6 @@ public class DataLoggerActivity extends AppCompatActivity
 
                 TextView tvLogId = (TextView)findViewById(R.id.textViewCurrentLogID);
                 tvLogId.setText("" + logIdResp.content);
-                logCreated = true;
             }
 
             @Override

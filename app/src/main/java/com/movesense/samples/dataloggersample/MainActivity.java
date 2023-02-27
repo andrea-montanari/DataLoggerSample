@@ -2,8 +2,11 @@ package com.movesense.samples.dataloggersample;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
@@ -65,6 +68,9 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
 
         // Make sure we have all the permissions this app needs
         requestNeededPermissions();
+
+        // Create notification channels
+        createNotificationChannels();
 
         // Initialize Movesense MDS library
         initMds();
@@ -297,6 +303,22 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
                 .setMessage(e.getMessage());
 
         builder.create().show();
+    }
+
+    /**
+     * Create the notification channels
+     */
+    private void createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channelDataRecording = new NotificationChannel(
+                    getString(R.string.channel_data_recording_id),
+                    getString(R.string.channel_data_recording_name),
+                    NotificationManager.IMPORTANCE_DEFAULT
+            );
+
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            manager.createNotificationChannel(channelDataRecording);
+        }
     }
 
 }
