@@ -23,9 +23,6 @@ public class BLEConnectionHandler {
     // BleClient singleton
     static private RxBleClient mBleClient;
 
-    // MDS singleton
-    static Mds mMds;
-
     private static final String URI_TIME = "suunto://{0}/Time";
     public static final String LOG_TAG = "BLE_CONNECTION_HANDLER";
 
@@ -42,6 +39,8 @@ public class BLEConnectionHandler {
 //
 //    }
 
+    private static Mds getMDS() {return MainActivity.mMds;}
+
     private static RxBleClient getBleClient(Activity callerActivity) {
         // Init RxAndroidBle (Ble helper library) if not yet initialized
         if (mBleClient == null)
@@ -53,20 +52,18 @@ public class BLEConnectionHandler {
     }
 
     public static void connectBLEDevice(
-            Mds mMds,
             ArrayList<MyScanResult> mScanResArrayList,
             ArrayAdapter<MyScanResult> mScanResArrayAdapter,
             String deviceMACAddress,
             Activity callerActivity
     ) {
-        BLEConnectionHandler.mMds = mMds;
         BLEConnectionHandler.mScanResArrayList = mScanResArrayList;
         BLEConnectionHandler.mScanResArrayAdapter = mScanResArrayAdapter;
 
         RxBleDevice bleDevice = getBleClient(callerActivity).getBleDevice(deviceMACAddress);
         Log.d(LOG_TAG, "Connecting to BLE device: " + bleDevice.getMacAddress());
         connected = false;
-        BLEConnectionHandler.mMds.connect(bleDevice.getMacAddress(), new MdsConnectionListener() {
+        getMDS().connect(bleDevice.getMacAddress(), new MdsConnectionListener() {
 
             @Override
             public void onConnect(String s) {
@@ -135,7 +132,6 @@ public class BLEConnectionHandler {
 
     public static void connectBLEDevice(String deviceMACAddress, Activity callerActivity) {
         BLEConnectionHandler.connectBLEDevice(
-                BLEConnectionHandler.mMds,
                 BLEConnectionHandler.mScanResArrayList,
                 BLEConnectionHandler.mScanResArrayAdapter,
                 deviceMACAddress,
@@ -154,7 +150,7 @@ public class BLEConnectionHandler {
     }
 
     public static void disconnectBLEDevice(String macAddress) {
-        BLEConnectionHandler.mMds.disconnect(macAddress);
+        getMDS().disconnect(macAddress);
     }
 
     private static void setCurrentTimeToSensor(String serial) {
@@ -163,7 +159,7 @@ public class BLEConnectionHandler {
         Log.d(LOG_TAG, "Set time sensor. URI: " + timeUri);
         String payload = "{\"value\":" + (new Date().getTime() * 1000) + "}";
         Log.d(LOG_TAG, "Set time sensor. Payload: " + payload);
-        BLEConnectionHandler.mMds.put(timeUri, payload, new MdsResponseListener() {
+        getMDS().put(timeUri, payload, new MdsResponseListener() {
             @Override
             public void onSuccess(String data) {
                 Log.i(LOG_TAG, "PUT /Time succesful: " + data);

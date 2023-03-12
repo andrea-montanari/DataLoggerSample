@@ -5,34 +5,24 @@ import android.app.Notification;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Binder;
 import android.os.Build;
-import android.os.Handler;
 import android.os.IBinder;
-import android.os.Looper;
 import android.os.SystemClock;
 import android.support.annotation.Nullable;
 
 import androidx.annotation.RequiresApi;
 
-import android.support.v7.app.AlertDialog;
 import android.util.Log;
-import android.view.View;
-import android.widget.ArrayAdapter;
-import android.widget.ListView;
-import android.widget.Spinner;
-import android.widget.TextView;
 
 import com.google.gson.Gson;
-import com.movesense.mds.Logger;
 import com.movesense.mds.Mds;
 import com.movesense.mds.MdsException;
 import com.movesense.mds.MdsResponseListener;
+import com.movesense.samples.dataloggersample.model.ExtendedEnergyGetModel;
 
 import java.text.MessageFormat;
-import java.util.ArrayList;
 import java.util.Date;
 
 public class LoggerForegroundService extends Service {
@@ -44,6 +34,9 @@ public class LoggerForegroundService extends Service {
     private static final String URI_DATALOGGER_STATE = "suunto://{0}/Mem/DataLogger/State";
     private static final String URI_MDS_LOGBOOK_ENTRIES = "suunto://MDS/Logbook/{0}/Entries";
     private static final String URI_MDS_LOGBOOK_DATA= "suunto://MDS/Logbook/{0}/ById/{1}/Data";
+    private static final String BATTERY_PATH_GET_EXTENDED = "/System/Energy";
+
+    public static final boolean GET_BATTERY_STATUS = false;
 
 //    private ListView mLogEntriesListView;
 //    private static ArrayList<MdsLogbookEntriesResponse.LogEntry> mLogEntriesArrayList = new ArrayList<>();
@@ -51,21 +44,25 @@ public class LoggerForegroundService extends Service {
 
     private Notification notification;
     private DataLoggerState mDLState;
-    private String connectedSerial = "214630000338";
+    private String connectedSerial;
     private String mDLConfigPath;
     private static Thread thread;
+    private static int batteryStatusSampleNumber;
     private static boolean logging;
     private static boolean logCreated = true;
     private static boolean logEntryFetched = true;
+    private static boolean logListRefreshed = true;
+    private static boolean gotBatteryStatus = false;
 
     private final IBinder binder = new LocalBinder();
 
     MdsLogbookEntriesResponse entriesResponse;
 
-    // Automatic logging variable
+    // Automatic logging variables
     private Activity currentActivity;
     private String connectedMAC;
     int logId;
+    private static final int RECORDING_TIME = 20;     // Minutes
 
     public class LocalBinder extends Binder {
         LoggerForegroundService getService() {
@@ -81,6 +78,7 @@ public class LoggerForegroundService extends Service {
         Log.d(TAG, "onCreate");
 
         entriesResponse = null;
+        batteryStatusSampleNumber = 1;
 
         // If the notification supports a direct reply action, use
         // PendingIntent.FLAG_MUTABLE instead.
@@ -114,89 +112,103 @@ public class LoggerForegroundService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-
         startForeground(ONGOING_NOTIFICATION_ID, notification);
 
         automaticLoggingManagement();
-
-//        thread = new Thread() {
-//            @Override public void run() {
-//                long startTime = 0;
-//                long endTime = 0;
-//                while (logData) {
-//                    setDataLoggerState(true);
-////                    startTime = System.nanoTime()/1000;
-////                    if (logCounter > 2) {
-////                        fetchLogEntry(logCounter);
-////                    }
-////                    endTime = System.nanoTime()/1000;
-////                    try {
-////                        Log.d(TAG, "Sleep time: " + (1000-(endTime-startTime)));
-////                        thread.sleep(1000-(endTime-startTime));
-////                    } catch (InterruptedException e) {
-////                        e.printStackTrace();
-////                    }
-////                    createNewLog();
-////                    logCounter++;
-//                }
-//
-//            }
-//        };
-//        thread.start();
 
         return super.onStartCommand(intent, flags, startId);
     }
 
     private void automaticLoggingManagement() {
 
+        if (logId == 2)
+            logCreated = logEntryFetched = logListRefreshed = true;
+        else
+            logCreated = logEntryFetched = logListRefreshed = false;
+        gotBatteryStatus = false;
+
+        if (GET_BATTERY_STATUS) {
+            getBatteryStatusPeriodic();
+        }
+        else {
+            gotBatteryStatus = true;
+        }
+
         thread = new Thread() {
             @Override public void run() {
                 long startTime;
                 long endTime;
                 while (logging) {
+                    // Communication with the sensor
                     startTime = SystemClock.elapsedRealtime();
                     if (logId > 2) {
+                        refreshLogList();
+                        // Wait for the log list to be refreshed
+//                        while (!logListRefreshed) {
+//                            Log.d("BLE_CONNECTION_HANDLER", "Waiting for log list refresh...");
+//                            try {
+//                                thread.sleep(50);
+//                            } catch (InterruptedException e) {
+//                                e.printStackTrace();
+//                            }
+//                        }
                         fetchLogEntry(logId - 1);
                     }
+
                     // Wait for new log to be created and for data to be fetched before disconnecting the device
-                    while ((!logCreated || !logEntryFetched) && logging) {
+                    while (!logCreated || !logEntryFetched) { // || !gotBatteryStatus) {
                         Log.d("BLE_CONNECTION_HANDLER", "Waiting for data retrieval...");
-                        Log.d("BLE_CONNECTION_HANDLER", "thread.isInterrupted(): " + thread.isInterrupted());
                         try {
-                            thread.sleep(50);
+                            thread.sleep(100);
                         } catch (InterruptedException e) {
                             e.printStackTrace();
                         }
                     }
-                    logCreated = false;
-                    logEntryFetched = false;
+                    logCreated = logEntryFetched = logListRefreshed = false;
+                    if (GET_BATTERY_STATUS) {
+                        gotBatteryStatus = false;
+                    }
                     endTime = SystemClock.elapsedRealtime();
+
                     try {
                         Log.d("MAC", "Connected MAC: " + connectedMAC);
+
+
                         BLEConnectionHandler.disconnectBLEDevice(connectedMAC);
-                        long timeToSleep = 3000 - (endTime - startTime);
-                        Log.d("Time", "Time difference: " + (endTime - startTime));
-                        Log.d("Time", "Time to sleep: " + timeToSleep);
+
+
+                        long timeToSleep = (RECORDING_TIME * 60000 - (endTime - startTime));
+                        Log.d("TIME_WAIT", "Time to sleep: " + timeToSleep);
                         if (timeToSleep < 0) {
                             thread.sleep(0);
                         }
                         else {
                             thread.sleep(timeToSleep);
                         }
-                        BLEConnectionHandler.connectBLEDevice(connectedMAC, currentActivity);
+
+                        Log.d("BLE_CONNECTION_HANDLER", "connectedMAC: " + connectedMAC);
+                        Log.d("BLE_CONNECTION_HANDLER", "Connected: " + BLEConnectionHandler.getDeviceIsConnected(connectedMAC));
+                        if (!BLEConnectionHandler.getDeviceIsConnected(connectedMAC))
+                            BLEConnectionHandler.connectBLEDevice(connectedMAC, currentActivity);
                         while (!BLEConnectionHandler.getDeviceIsConnected(connectedMAC) && logging) {
                             Log.d("BLE_CONNECTION_HANDLER", "Waiting for connection...");
                             thread.sleep(100);
                         }
+
+
                         Log.d("BLE_CONNECTION_HANDLER", "After while. Connection completed.");
-                        Log.d("Time", "Time after: " + System.nanoTime()/1000);
+                        Log.d("TIME_WAIT", "Time after: " + System.nanoTime()/1000);
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
                     // Check again for when the STOP LOGGING button is pressed
+                    Log.d("BLE_CONNECTION_HANDLER", "Logging: " + logging);
+
                     if (logging) {
+                        Log.d("BLE_CONNECTION_HANDLER", "createNewLog");
                         createNewLog();
                         logId++;
+                        Log.d("BLE_CONNECTION_HANDLER", "LogId: " + logId);
                     }
                 }
             }
@@ -204,6 +216,54 @@ public class LoggerForegroundService extends Service {
         thread.start();
     }
 
+    private void getBatteryStatusPeriodic() {
+        new Thread() {
+            @Override
+            public void run() {
+                while (logging) {
+                    getBatteryStatus();
+                    try {
+                        Thread.sleep(600000);   // get battery status once every 10 minutes
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }.start();
+    }
+
+    private void getBatteryStatus() {
+
+        Log.d("BATTERY_STATUS", "\n\ngetBatteryStatus. Sample number " + batteryStatusSampleNumber);
+        mDLConfigPath = null;
+
+        for (int i=0; i<3; i++) {
+            // Try with this: MovesenseConnectedDevices.getConnectedDevice(0).getSerial()
+            final int idx = i;
+            getMDS().get(MainActivity.SCHEME_PREFIX +
+                            connectedSerial + BATTERY_PATH_GET_EXTENDED,
+                    null, new MdsResponseListener() {
+                        @Override
+                        public void onSuccess(String s) {
+                            gotBatteryStatus = true;
+                            ExtendedEnergyGetModel extendedEnergyGetModel = new Gson().fromJson(s, ExtendedEnergyGetModel.class);
+                            Log.d("BATTERY_STATUS", "Detection " + (idx+1));
+                            Log.d("BATTERY_STATUS", "Battery percentage: " + extendedEnergyGetModel.mContent.getPercent());
+                            Log.d("BATTERY_STATUS", "Battery mV: " + extendedEnergyGetModel.mContent.getMilliVoltages());
+                            Log.d("BATTERY_STATUS", "Battery resistance: " + extendedEnergyGetModel.mContent.getInternalResistance());
+                        }
+
+                        @Override
+                        public void onError(MdsException e) {
+                            Log.e("BATTERY_STATUS", "onError: ", e);
+                        }
+                    });
+        }
+        batteryStatusSampleNumber++;
+    }
+
+
+    //region GETTERS/SETTERS
     public void setLogging(boolean logging) {
         this.logging = logging;
     }
@@ -224,7 +284,12 @@ public class LoggerForegroundService extends Service {
         this.connectedMAC = connectedMAC;
     }
 
+    public void setConnectedSerial(String connectedSerial) {
+        this.connectedSerial = connectedSerial;
+    }
+
     public void setLogId(int logId) {
+        Log.d("BLE_CONNECTION_HANDLER", "setLogId: " + logId);
         this.logId = logId;
     }
 
@@ -239,6 +304,7 @@ public class LoggerForegroundService extends Service {
     public int getLogId() {
         return logId;
     }
+    //endregion
 
     public MdsLogbookEntriesResponse getEntriesResponse() {
         return entriesResponse;
@@ -251,46 +317,11 @@ public class LoggerForegroundService extends Service {
         return binder;
     }
 
-//    private void setDataLoggerState(final boolean bStartLogging) {
-//        // Access the DataLogger/State
-//        String stateUri = MessageFormat.format(URI_DATALOGGER_STATE, connectedSerial);
-//        final Context me = this;
-//        int newState = bStartLogging ? 3 : 2;   // 3 = logging, 2 = stop logging
-//        String payload = "{\"newState\":" + newState + "}";
-//        getMDS().put(stateUri, payload, new MdsResponseListener() {
-//            @Override
-//            public void onSuccess(String data) {
-//                Log.i(TAG, "PUT DataLogger/State state succesful: " + data);
-//
-//                mDLState.content = newState;
-//                // Update log list if we stopped
-//                if (!bStartLogging)
-//                    refreshLogList();
-//            }
-//
-//            @Override
-//            public void onError(MdsException e) {
-//                Log.e(TAG, "PUT DataLogger/State returned error: " + e);
-//
-//                if (e.getStatusCode()==423 && bStartLogging) {
-//                    // Handle "LOCKED" from NAND variant
-//                    new AlertDialog.Builder(me)
-//                            .setTitle("DataLogger Error")
-//                            .setMessage("Can't start logging due to error 'locked'. Possibly too low battery on the sensor.")
-//                            .show();
-//
-//                }
-//
-//            }
-//        });
-//    }
-
     private void fetchLogEntry(final int id) {
         Log.d("Fetch", "fetchLogEntry");
 
 //        findViewById(R.id.headerProgress).setVisibility(View.VISIBLE);
         // GET the /MDS/Logbook/Data proxy
-        refreshLogList();
 
         String logDataUri = MessageFormat.format(URI_MDS_LOGBOOK_DATA, connectedSerial, id);
         final Context me = this;
@@ -324,83 +355,6 @@ public class LoggerForegroundService extends Service {
 
     private Mds getMDS() {return MainActivity.mMds;}
 
-//    private void fetchDataLoggerState() {
-//        // Access the DataLogger/State
-//        String stateUri = MessageFormat.format(URI_DATALOGGER_STATE, connectedSerial);
-//
-//        getMDS().get(stateUri, null, new MdsResponseListener() {
-//            @Override
-//            public void onSuccess(String data) {
-//                Log.i(TAG, "GET state successful: " + data);
-//
-//                mDLState = new Gson().fromJson(data, DataLoggerState.class);
-//            }
-//
-//            @Override
-//            public void onError(MdsException e) {
-//                Log.e(TAG, "GET DataLogger/State returned error: " + e);
-//            }
-//        });
-//    }
-
-//    private boolean mPathSelectionSetInternally = false;
-//    private void fetchDataLoggerConfig() {
-//        // Access the DataLogger/State
-//        String stateUri = MessageFormat.format(URI_DATALOGGER_CONFIG, connectedSerial);
-//        mDLConfigPath = null;
-//
-//        getMDS().get(stateUri, null, new MdsResponseListener() {
-//            @Override
-//            public void onSuccess(String data) {
-//                Log.i(TAG, "GET DataLogger/Config succesful: " + data);
-//
-//                DataLoggerConfig config = new Gson().fromJson(data, DataLoggerConfig.class);
-////                Spinner spinner = (Spinner)findViewById(R.id.path_spinner);
-//                for (DataLoggerConfig.DataEntry de : config.content.dataEntries.dataEntry) {
-//                    Log.d(TAG, "DataEntry: " + de.path);
-//
-//                    String dePath = de.path;
-//                    if (dePath.contains("{")) {
-//                        dePath = dePath.substring(0, dePath.indexOf('{'));
-//                        Log.d(TAG, "dePath: " + dePath);
-//
-//                    }
-//                    // Start searching for item from 1 since 0 is the default text for empty selection
-////                    for (int i=1; i<spinner.getAdapter().getCount(); i++)
-////                    {
-////                        String path = spinner.getItemAtPosition(i).toString();
-////                        Log.d(TAG, "spinner.path["+ i+"]: " + path);
-////                        // Match the beginning (skip the part with samplerate parameter)
-////                        if (path.toLowerCase().startsWith(dePath.toLowerCase()))
-////                        {
-////                            mPathSelectionSetInternally = true;
-////                            Log.d(TAG, "mPathSelectionSetInternally to #"+ i);
-////
-//////                            spinner.setSelection(i);
-//                    mDLConfigPath = "/Meas/Acc/13";
-////                            break;
-////                        }
-////                    }
-//                }
-//                // If no match found, set to first item (/Meas/Acc/13)
-////                if (mDLConfigPath == null)
-////                {
-////                    Log.d(TAG, "no match found, set to first item");
-////
-////                    spinner.setSelection(0);
-////                }
-//
-//                fetchDataLoggerState();
-//            }
-//
-//            @Override
-//            public void onError(MdsException e) {
-//                Log.e(TAG, "GET DataLogger/Config returned error: " + e);
-//                fetchDataLoggerState();
-//            }
-//        });
-//    }
-
     private void createNewLog() {
         // Access the Logbook/Entries resource
         String entriesUri = MessageFormat.format(URI_LOGBOOK_ENTRIES, connectedSerial);
@@ -422,7 +376,7 @@ public class LoggerForegroundService extends Service {
         });
 
     }
-//
+    //
 //    private void fetchLogEntry(final int id) {
 //        // GET the /MDS/Logbook/Data proxy
 //        String logDataUri = MessageFormat.format(URI_MDS_LOGBOOK_DATA, connectedSerial, id);
@@ -485,13 +439,15 @@ public class LoggerForegroundService extends Service {
     private void refreshLogList() {
         // Access the /Logbook/Entries
         String entriesUri = MessageFormat.format(URI_MDS_LOGBOOK_ENTRIES, connectedSerial);
+        Log.i("BLE_CONNECTION_HANDLER", "GET LogEntries");
 
         getMDS().get(entriesUri, null, new MdsResponseListener() {
             @Override
             public void onSuccess(String data) {
-                Log.i(TAG, "GET LogEntries succesful: " + data);
+                Log.i("BLE_CONNECTION_HANDLER", "GET LogEntries succesful: " + data);
 
                 entriesResponse = new Gson().fromJson(data, MdsLogbookEntriesResponse.class);
+                logListRefreshed = true;
 
 
             }

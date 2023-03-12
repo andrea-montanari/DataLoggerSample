@@ -185,7 +185,6 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
 
             // And connect to the device
             BLEConnectionHandler.connectBLEDevice(
-                    mMds,
                     mScanResArrayList,
                     mScanResArrayAdapter,
                     device.macAddress,

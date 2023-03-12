@@ -92,8 +92,6 @@ public class DataLoggerActivity extends AppCompatActivity
     Thread threadUpdateUI;
     boolean updateUI = false;
 
-    public static final String SCHEME_PREFIX = "suunto://";
-
     private Handler logIdHandler;
 
     private Mds getMDS() {return MainActivity.mMds;}
@@ -122,6 +120,7 @@ public class DataLoggerActivity extends AppCompatActivity
         pathSpinner.setSelection(0);
 
         logIdHandler = new Handler();
+        mService = new LoggerForegroundService();
 
         // Bind to service
         loggerServiceIntent = new Intent(this, LoggerForegroundService.class);
@@ -184,6 +183,7 @@ public class DataLoggerActivity extends AppCompatActivity
             @Override
             public void run() {
                 while (updateUI) {
+                    Log.d("START_SERVICE", "While in startService");
                     try {
                         Thread.sleep(500);
                     } catch (InterruptedException e) {
@@ -191,16 +191,19 @@ public class DataLoggerActivity extends AppCompatActivity
                     }
 
                     int logId = mService.getLogId();
+                    Log.d("START_SERVICE", "logId: " + logId);
                     logIdHandler.post(() -> {
+                        tvLogId.setText("" + logId);
                         mLogEntriesArrayList.clear();
                         MdsLogbookEntriesResponse entriesResponse = mService.getEntriesResponse();
+                        Log.d("START_SERVICE", "Entries: " + entriesResponse);
                         if (entriesResponse != null) {
                             for (MdsLogbookEntriesResponse.LogEntry logEntry : entriesResponse.logEntries) {
-                                Log.d(LOG_TAG, "Entry: " + logEntry);
+                                Log.d("START_SERVICE", "Entry: " + logEntry);
                                 mLogEntriesArrayList.add(logEntry);
                             }
                             mLogEntriesArrayAdapter.notifyDataSetChanged();
-                            tvLogId.setText("" + logId);
+                            Log.d("START_SERVICE", "logId: " + logId);
                         }
                     });
                 }
@@ -478,6 +481,7 @@ public class DataLoggerActivity extends AppCompatActivity
                                     }
                                 }
                                 mService.setConnectedMAC(connectedMAC);
+                                mService.setConnectedSerial(connectedSerial);
                                 mService.setLogId(logId);
                                 startService();
                             }
@@ -542,14 +546,14 @@ public class DataLoggerActivity extends AppCompatActivity
                     }
                 }
                 // Wait for data retrieval to finish
-                while (mService.getThreadIsRunning()) {
-                    Log.d("THREAD_STOP_LOGGING", "Thread active");
-                    try {
-                        Thread.sleep(100);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }
+//                while (mService.getThreadIsRunning()) {
+//                    Log.d("THREAD_STOP_LOGGING", "Thread active");
+//                    try {
+//                        Thread.sleep(100);
+//                    } catch (InterruptedException e) {
+//                        e.printStackTrace();
+//                    }
+//                }
                 setDataLoggerState(false);
                 Log.d("THREAD_STOP_LOGGING", "setDataLoggerState called.");
             }
